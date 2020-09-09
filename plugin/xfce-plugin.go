@@ -1,8 +1,8 @@
-package panel
+package plugin
 
 // #cgo pkg-config: libxfce4panel-2.0
 // #include <libxfce4panel/xfce-panel-plugin.h>
-// #include "xfce-panel-plugin.go.h"
+// #include "xfce-plugin.h"
 import "C"
 
 import (

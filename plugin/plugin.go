@@ -1,11 +1,13 @@
-package panel
+package plugin
 
 // #include <libxfce4panel/xfce-panel-plugin.h>
 import "C"
+
 import (
 	"fmt"
 	"log"
 	"sort"
+	"strconv"
 	"unsafe"
 
 	"github.com/amimof/huego"
@@ -28,7 +30,7 @@ func PluginBuild(plugin *C.XfcePanelPlugin) {
 	ebox, _ := gtk.EventBoxNew()
 	ebox.Show()
 	button, _ := gtk.ButtonNew()
-	image, _ := gtk.ImageNewFromIconName("xfce4-lighter-plugin", gtk.ICON_SIZE_SMALL_TOOLBAR)
+	image, _ := gtk.ImageNewFromIconName("xfce4-lighter-plugin", gtk.ICON_SIZE_LARGE_TOOLBAR)
 	button.SetImage(image)
 	button.SetRelief(gtk.RELIEF_NONE)
 	ebox.SetTooltipText("lighter")
@@ -70,6 +72,7 @@ func lighterPopup(obj *gtk.Button, parent *glib.Object) {
 	win.Stick()
 	win.SetSkipTaskbarHint(true)
 	win.SetSkipPagerHint(true)
+
 	var x, y C.gint
 	C.xfce_panel_plugin_position_widget(xfceGoPlugin.native(),
 		(*C.GtkWidget)(unsafe.Pointer(obj.Native())),
@@ -87,13 +90,13 @@ func lighterPopup(obj *gtk.Button, parent *glib.Object) {
 	})
 
 	bridge.Bridge = hue.Connect()
-	fillInPopupConnected(win)
+	fillInPopupData(win)
 	//fillInPopupRegister(win)
 
 }
 
 func fillInPopupRegister(win *gtk.Window) {
-	box, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 2)
+	box, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 10)
 	label, _ := gtk.LabelNew("Register bridge first")
 	button, _ := gtk.ButtonNew()
 	button.SetLabel("Register")
@@ -110,19 +113,81 @@ func fillInPopupRegister(win *gtk.Window) {
 	win.ShowAll()
 }
 
-func fillInPopupConnected(win *gtk.Window) {
+func fillInPopupData(win *gtk.Window) {
 	groupIds, groupMap := getSortedGroups()
-	box, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 2)
-	for _, groupId := range groupIds {
-		group := groupMap[groupId]
-		innerBox, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 5)
+	box, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 60)
+	listBox, _ := gtk.ListBoxNew()
+	listBox.SetSelectionMode(gtk.SELECTION_NONE)
+	box.PackStart(listBox, true, true, 0)
+	for _, groupID := range groupIds {
+		group := groupMap[groupID]
+
+		row, _ := gtk.ListBoxRowNew()
+		vBox, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 6)
+		hBox, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 50)
+		vBox.PackStart(hBox, true, true, 0)
+		slider, _ := gtk.ScaleNewWithRange(gtk.ORIENTATION_HORIZONTAL, 1, 254, 1)
+		slider.SetValue(float64(group.State.Bri))
+		slider.SetDrawValue(false)
+
+		vBox.PackStart(slider, true, true, 0)
 		label, _ := gtk.LabelNew(group.Name)
 		switchButton, _ := gtk.SwitchNew()
 		switchButton.SetActive(group.IsOn())
-		innerBox.PackStart(label, true, true, 0)
-		innerBox.PackStart(switchButton, false, false, 0)
-		box.PackStart(innerBox, false, false, 0)
+		switchButton.SetVAlign(gtk.ALIGN_CENTER)
+		switchButton.SetHAlign(gtk.ALIGN_END)
+		hBox.PackStart(label, false, true, 0)
+		hBox.PackStart(switchButton, true, true, 0)
+		row.Add(vBox)
+		listBox.Add(row)
 		switchButton.Connect("state-set", switchForGroup, group)
+		if !group.IsOn() {
+			slider.SetSensitive(false)
+		}
+
+		slider.Range.Connect("change-value", func(sliderRange *gtk.Scale, scrollType C.GtkScrollType, value float64, group *huego.Group) {
+			var brightness uint8
+
+			// Will do for each lamp as setting brightness with long scroll to group f#@ks things up
+
+			// some boundaries
+			// if value > 254 {
+			// brightness = 254
+			// } else if value < 1 {
+			// 	brightness = 1
+			// } else {
+			// 	brightness = uint8(value)
+			// }
+			// fmt.Printf("brightness: %d\n", brightness)
+			// if err := group.Bri(brightness); err != nil {
+			// 	fmt.Println("Failed to update group light: ", err)
+			// }
+
+			sliderValue := sliderRange.GetValue()
+			valueStep := value - sliderValue
+			for _, light := range group.Lights {
+
+				lightId, _ := strconv.Atoi(light)
+				l, _ := bridge.GetLight(lightId)
+				fmt.Printf("lamp: %s\n", l.Name)
+				fmt.Printf("current brightness: %d\n", l.State.Bri)
+
+				currentBri := float64(l.State.Bri)
+				newBri := currentBri + valueStep
+
+				if newBri > 254 {
+					brightness = 254
+				} else if newBri < 1 {
+					brightness = 1
+				} else {
+					brightness = uint8(newBri)
+				}
+				fmt.Printf("new brightness: %d\n", brightness)
+				l.Bri(brightness)
+			}
+
+		}, &group)
+
 	}
 	win.Add(box)
 	win.ShowAll()
@@ -182,7 +247,7 @@ func updateOnScroll(scrollEventChan chan gdk.ScrollDirection) {
 				}
 				fmt.Println("Setting new brightness: ", brightness)
 				if err := light.Bri(brightness); err != nil {
-					fmt.Println("Error updating %q: ", light.Name, err)
+					fmt.Printf("Error updating %q: %s\n", light.Name, err)
 				}
 			}
 		}
@@ -193,7 +258,7 @@ func updateOnScroll(scrollEventChan chan gdk.ScrollDirection) {
 func AboutDialog() {
 	about, _ := gtk.AboutDialogNew()
 	about.AddCreditSection("Icons", []string{"Maya Canne"})
-	about.SetProgramName("xfce-lighter-plugin")
+	about.SetProgramName("xfce4-lighther-plugin")
 	about.SetAuthors([]string{"Michael Ketslah"})
 	about.SetIconName("xfce4-lighter-plugin")
 	about.ShowNow()
