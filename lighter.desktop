@@ -1,0 +1,10 @@
+[Xfce Panel]
+Type=X-XFCE-PanelPlugin
+Encoding=UTF-8
+Name=Lighter
+Comment=Lighter is xfce4 plugin for hue lights control
+Icon=xfce4-lighter-plugin
+X-XFCE-Module=lighter
+X-XFCE-Internal=true
+X-XFCE-Unique=true
+X-XFCE-API=2.0
