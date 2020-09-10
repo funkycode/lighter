@@ -11,10 +11,6 @@ import (
 	"github.com/gotk3/gotk3/glib"
 )
 
-type Plugin struct {
-	panelPlugin *C.XfcePanelPlugin
-}
-
 func GetPlugin() *Plugin {
 
 	return xfceGoPlugin

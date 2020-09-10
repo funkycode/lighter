@@ -1,4 +1,6 @@
-# lighter
+# lighter xfce4 panle plugin
+
+![Alt Text](https://imgur.com/2bJ87qU.gif)
 
 Simple xfce4 plugin that allows to turn on and off groups for hue lights 
 
