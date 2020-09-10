@@ -54,11 +54,20 @@ func PluginBuild(plugin *C.XfcePanelPlugin) {
 	go updateOnScroll(scrollEventChan)
 }
 
-func switchForGroup(widget *gtk.Switch, state bool, group huego.Group) {
-	if widget.GetActive() {
-		group.On()
-	} else {
-		group.Off()
+func switchForObj(widget *gtk.Switch, state bool, o interface{}) {
+	switch obj := o.(type) {
+	case huego.Light:
+		if widget.GetActive() {
+			obj.On()
+		} else {
+			obj.Off()
+		}
+	case huego.Group:
+		if widget.GetActive() {
+			obj.On()
+		} else {
+			obj.Off()
+		}
 	}
 }
 
@@ -114,8 +123,30 @@ func fillInPopupRegister(win *gtk.Window) {
 }
 
 func fillInPopupData(win *gtk.Window) {
+
+	groupBox := buildGroupBox()
+	lightBox := buildLightBox()
+
+	stack, _ := gtk.StackNew()
+	stack.AddTitled(groupBox, "groups", "groups")
+	stack.AddTitled(lightBox, "lights", "lights")
+	stack.SetTransitionType(gtk.STACK_TRANSITION_TYPE_SLIDE_LEFT_RIGHT)
+	stackSwitcher, _ := gtk.StackSwitcherNew()
+	stackSwitcher.SetStack(stack)
+
+	stackSwitcher.SetHAlign(gtk.ALIGN_CENTER)
+
+	stackBox, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
+	stackBox.PackStart(stackSwitcher, true, true, 0)
+	stackBox.PackStart(stack, true, true, 0)
+
+	win.Add(stackBox)
+	win.ShowAll()
+}
+
+func buildGroupBox() (box *gtk.Box) {
 	groupIds, groupMap := getSortedGroups()
-	box, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 60)
+	box, _ = gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 60)
 	listBox, _ := gtk.ListBoxNew()
 	listBox.SetSelectionMode(gtk.SELECTION_NONE)
 	box.PackStart(listBox, true, true, 0)
@@ -140,7 +171,7 @@ func fillInPopupData(win *gtk.Window) {
 		hBox.PackStart(switchButton, true, true, 0)
 		row.Add(vBox)
 		listBox.Add(row)
-		switchButton.Connect("state-set", switchForGroup, group)
+		switchButton.Connect("state-set", switchForObj, group)
 		if !group.IsOn() {
 			slider.SetSensitive(false)
 		}
@@ -189,8 +220,61 @@ func fillInPopupData(win *gtk.Window) {
 		}, &group)
 
 	}
-	win.Add(box)
-	win.ShowAll()
+	return
+}
+
+func buildLightBox() (box *gtk.Box) {
+	box, _ = gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 60)
+	listBox, _ := gtk.ListBoxNew()
+	listBox.SetSelectionMode(gtk.SELECTION_NONE)
+	box.PackStart(listBox, true, true, 0)
+	lightsIds, lights := getSortedLights()
+	for _, lightID := range lightsIds {
+		light := lights[lightID]
+		row, _ := gtk.ListBoxRowNew()
+		vBox, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 6)
+		hBox, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 50)
+		vBox.PackStart(hBox, true, true, 0)
+		slider, _ := gtk.ScaleNewWithRange(gtk.ORIENTATION_HORIZONTAL, 1, 254, 1)
+		slider.SetValue(float64(light.State.Bri))
+		slider.SetDrawValue(false)
+
+		vBox.PackStart(slider, true, true, 0)
+		label, _ := gtk.LabelNew(light.Name)
+		switchButton, _ := gtk.SwitchNew()
+		switchButton.SetActive(light.IsOn())
+		switchButton.SetVAlign(gtk.ALIGN_CENTER)
+		switchButton.SetHAlign(gtk.ALIGN_END)
+		hBox.PackStart(label, false, true, 0)
+		hBox.PackStart(switchButton, true, true, 0)
+		row.Add(vBox)
+		listBox.Add(row)
+		switchButton.Connect("state-set", switchForObj, light)
+		if !light.IsOn() {
+			slider.SetSensitive(false)
+		}
+
+		slider.Range.Connect("change-value", func(sliderRange *gtk.Scale, scrollType C.GtkScrollType, value float64, light huego.Light) {
+			var brightness uint8
+			fmt.Printf("lamp: %s\n", light.Name)
+			fmt.Printf("current brightness: %d\n", light.State.Bri)
+			sliderValue := sliderRange.GetValue()
+			valueStep := value - sliderValue
+			currentBri := float64(light.State.Bri)
+			newBri := currentBri + valueStep
+			if newBri > 254 {
+				brightness = 254
+			} else if newBri < 1 {
+				brightness = 1
+			} else {
+				brightness = uint8(newBri)
+			}
+			fmt.Printf("new brightness: %d\n", brightness)
+			light.Bri(brightness)
+
+		}, light)
+	}
+	return
 }
 
 func sendNotification(title, body string) {
@@ -216,6 +300,17 @@ func getSortedGroups() (groupIds []int, groupMap map[int]huego.Group) {
 		groupIds = append(groupIds, group.ID)
 	}
 	sort.Ints(groupIds)
+	return
+}
+
+func getSortedLights() (lightIds []int, lightMap map[int]huego.Light) {
+	lightMap = make(map[int]huego.Light)
+	lights, _ := bridge.GetLights()
+	for _, light := range lights {
+		lightMap[light.ID] = light
+		lightIds = append(lightIds, light.ID)
+	}
+	sort.Ints(lightIds)
 	return
 }
 
@@ -257,7 +352,7 @@ func updateOnScroll(scrollEventChan chan gdk.ScrollDirection) {
 //export AboutDialog
 func AboutDialog() {
 	about, _ := gtk.AboutDialogNew()
-	about.AddCreditSection("Icons", []string{"Maya Canne"})
+	about.AddCreditSection("Icons", []string{"May Canne"})
 	about.SetProgramName("xfce4-lighther-plugin")
 	about.SetAuthors([]string{"Michael Ketslah"})
 	about.SetIconName("xfce4-lighter-plugin")
