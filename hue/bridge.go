@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/user"
 	"path"
+	"sync"
 	"time"
 
 	"github.com/amimof/huego"
@@ -19,7 +20,6 @@ const (
 type Bridge struct {
 	*huego.Bridge
 	registered bool
-	connected  bool
 }
 
 // Settings contains hue light connection settings
@@ -59,10 +59,7 @@ func NewSettings() (settings Settings, err error) {
 	}
 	defer file.Close()
 	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&settings)
-	if err != nil {
-		return
-	}
+	decoder.Decode(&settings)
 	return
 }
 
@@ -83,26 +80,77 @@ func (s *Settings) Save() (err error) {
 	return
 }
 
-func Connect() (bridge *huego.Bridge) {
-	settings, _ := NewSettings()
-	bridge = huego.New(settings.IP, settings.User)
+func (b *Bridge) Connect() {
+	settings, err := NewSettings()
+	if err != nil {
+		return
+	}
+	b.Bridge = huego.New(settings.IP, settings.User)
+	config, err := b.GetConfig()
+	fmt.Printf("config: %#v\nerror:%s\n", config, err)
+	if err != nil {
+		return
+	}
+	for _, w := range config.Whitelist {
+		if w.Username == settings.User {
+			b.registered = true
+			break
+		}
+	}
 	return
 }
 
-func Register() {
+func (b *Bridge) IsRegistered() bool {
+	return b.registered
+}
+
+func (b *Bridge) Register(waitTime time.Duration) (err error) {
+	var user string
+	var wg sync.WaitGroup
 	settings, err := NewSettings()
-	bridge, _ := huego.Discover()
-	fmt.Println("Press connect button on bridge (waiting for 10 seconds)")
-	time.Sleep(10 * time.Second)
-	user, err := bridge.CreateUser(bridgeName)
 	if err != nil {
-		log.Panicf("Failed to register user: %s\n", err)
+		fmt.Println("Get settings fail:", err)
+		return
 	}
-	bridge = bridge.Login(user)
-	settings.IP = bridge.Host
-	settings.User = bridge.User
+	bridge, err := huego.Discover()
+	if err != nil {
+		fmt.Println("Discover fail:", err)
+		return
+	}
+	wg.Add(1)
+	go func() {
+		for {
+			user, err = bridge.CreateUser(bridgeName)
+			if err != nil {
+				fmt.Println("Failed to register:", err)
+				err = nil
+				time.Sleep(1 * time.Second)
+				continue
+			}
+			wg.Done()
+			break
+		}
+	}()
+	wg.Wait()
+	b.Bridge = bridge.Login(user)
+	settings.IP = b.Bridge.Host
+	settings.User = b.Bridge.User
 	err = settings.Save()
 	if err != nil {
-		log.Panicf("Failed to save settings: %s\n", err)
+		fmt.Println("Save fail:", err)
+		return
 	}
+	config, err := b.GetConfig()
+	if err != nil {
+		fmt.Println("Config:", err)
+		return
+	}
+	for _, w := range config.Whitelist {
+		if w.Username == settings.User {
+			b.registered = true
+			break
+		}
+	}
+	return
+
 }

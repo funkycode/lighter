@@ -30,20 +30,6 @@ type updateEvent struct {
 	toggleOn bool
 }
 
-// type IControllElement interface {
-// 	monitor()
-// 	toggle()
-// }
-// type lightElement struct {
-// 	huego.Light
-// 	IControllElement
-// }
-
-// func (e *lightElement) monitor() {
-// 	xfceGoPlugin.bridge.GetLight(e.ID)
-
-// }
-
 var xfceGoPlugin *Plugin
 
 // PluginBuild is exported function to init plugin
@@ -225,29 +211,38 @@ func lighterPopup(obj *gtk.Button, parent *glib.Object) {
 		win.Destroy()
 	})
 
-	bridge.Bridge = hue.Connect()
-	fillInPopupData(win)
-	//fillInPopupRegister(win)
+	bridge.Connect()
+	if bridge.IsRegistered() {
+		fillInPopupData(win)
+	} else {
+		sendNotification("lighter", "Press button on bridge to register")
+		if err := bridge.Register(20); err != nil {
+			sendNotification("lighter", fmt.Sprintf("Registration failed with error:\n%s", err))
+			return
+		}
+		sendNotification("lighter", "Registered successfully")
+		//fillInPopupRegister(win)
+	}
 
 }
 
-func fillInPopupRegister(win *gtk.Window) {
-	box, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 10)
-	label, _ := gtk.LabelNew("Register bridge first")
-	button, _ := gtk.ButtonNew()
-	button.SetLabel("Register")
+// func fillInPopupRegister(win *gtk.Window) {
+// 	box, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 10)
+// 	label, _ := gtk.LabelNew("Register bridge first")
+// 	button, _ := gtk.ButtonNew()
+// 	button.SetLabel("Register")
 
-	button.Connect("clicked", func() {
-		button.Destroy()
-		label.SetLabel("Press button on bridge")
-		sendNotification("lighter", "Press button on bridge")
+// 	button.Connect("clicked", func() {
+// 		button.Destroy()
+// 		label.SetLabel("Press button on bridge")
+// 		sendNotification("lighter", "Press button on bridge")
 
-	})
-	box.PackStart(label, false, false, 0)
-	box.PackStart(button, false, false, 0)
-	win.Add(box)
-	win.ShowAll()
-}
+// 	})
+// 	box.PackStart(label, false, false, 0)
+// 	box.PackStart(button, false, false, 0)
+// 	win.Add(box)
+// 	win.ShowAll()
+// }
 
 func fillInPopupData(win *gtk.Window) {
 
@@ -459,17 +454,6 @@ func buildLightBox() (box *gtk.Box) {
 	return
 }
 
-func sendNotification(title, body string) {
-	appID := "org.lighter.notification"
-	notification := glib.NotificationNew(title)
-	notification.SetBody(body)
-	app, _ := gtk.ApplicationNew(appID, glib.APPLICATION_FLAGS_NONE)
-	app.Connect("activate", func() {
-		app.SendNotification(appID, notification)
-	})
-	app.Run(nil)
-}
-
 // Here we want to sort all groups so we do not get different order eahc click
 func getSortedGroups() (groupIds []int, groupMap map[int]huego.Group) {
 	groupMap = make(map[int]huego.Group)
@@ -529,6 +513,17 @@ func updateOnScroll(scrollEventChan chan gdk.ScrollDirection) {
 			}
 		}
 	}
+}
+
+func sendNotification(title, body string) {
+	appID := "org.lighter.notification"
+	notification := glib.NotificationNew(title)
+	notification.SetBody(body)
+	app, _ := gtk.ApplicationNew(appID, glib.APPLICATION_FLAGS_NONE)
+	app.Connect("activate", func() {
+		app.SendNotification(appID, notification)
+	})
+	app.Run(nil)
 }
 
 //export AboutDialog
