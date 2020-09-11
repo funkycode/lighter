@@ -2,7 +2,6 @@ package plugin
 
 // #include <libxfce4panel/xfce-panel-plugin.h>
 import "C"
-
 import (
 	"fmt"
 	"log"
@@ -25,9 +24,10 @@ type Plugin struct {
 var bridge hue.Bridge
 
 type updateEvent struct {
-	id     int
-	bri    uint8
-	active bool
+	id       int
+	bri      uint8
+	active   bool
+	toggleOn bool
 }
 
 // type IControllElement interface {
@@ -99,6 +99,11 @@ func switchForObj(switchWidget *gtk.Switch, state bool, o interface{}) {
 			obj.Off()
 		}
 	case huego.Group:
+		fmt.Println("Toggling ", obj.Name)
+		fmt.Printf("Event from %#v\n", switchWidget)
+		if obj.IsOn() == switchWidget.GetActive() {
+			fmt.Println("Skipping ", obj.Name)
+		}
 		if switchWidget.GetActive() {
 			obj.On()
 		} else {
@@ -123,7 +128,6 @@ func monitorLamps(monitorChan chan updateEvent, stopChan chan struct{}) {
 			}
 
 			for _, lamp := range lamps {
-				fmt.Printf("Checking lamp (%d): %q\n", lamp.ID, lamp.Name)
 				bri := lamp.State.Bri
 				isOn := lamp.IsOn()
 				id := lamp.ID
@@ -160,19 +164,32 @@ func monitorGroups(monitorChan chan updateEvent, stopChan chan struct{}) {
 			}
 
 			for _, group := range groups {
-				fmt.Printf("Checking group (%d): %q\n", group.ID, group.Name)
+				if group.Type == "LightGroup" {
+					continue
+				}
 				bri := group.State.Bri
-				isOn := group.IsOn()
+				isOn := group.GroupState.AllOn
 				id := group.ID
-				currentState, ok := currentStates[group.ID]
+				toggle := true
+				currentState, ok := currentStates[id]
+
 				if ok && currentState.bri == bri && currentState.active == isOn {
 					continue
 				}
-				update := updateEvent{
-					id:     id,
-					bri:    bri,
-					active: isOn,
+
+				if (currentState.active && group.GroupState.AnyOn) || (!currentState.active && !group.GroupState.AllOn) {
+					toggle = false
+					isOn = currentState.active
 				}
+
+				update := updateEvent{
+					id:       id,
+					bri:      bri,
+					active:   isOn,
+					toggleOn: toggle,
+				}
+				fmt.Println("triggering change event for group", group.Name)
+
 				currentStates[id] = update
 				monitorChan <- update
 			}
@@ -248,6 +265,12 @@ func fillInPopupData(win *gtk.Window) {
 	win.ShowAll()
 }
 
+type controller struct {
+	switchHandler glib.SignalHandle
+	toggleSwitch  *gtk.Switch
+	briRange      *gtk.Range
+}
+
 func buildGroupBox() (box *gtk.Box) {
 	groupIds, groupMap := getSortedGroups()
 	box, _ = gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 60)
@@ -260,10 +283,6 @@ func buildGroupBox() (box *gtk.Box) {
 		close(stopChan)
 	}, stopChan)
 	go monitorGroups(monitorChan, stopChan)
-	type controller struct {
-		toggleSwitch *gtk.Switch
-		briRange     *gtk.Range
-	}
 	controls := make(map[int]controller)
 	for _, groupID := range groupIds {
 		group := groupMap[groupID]
@@ -291,7 +310,7 @@ func buildGroupBox() (box *gtk.Box) {
 			slider.SetSensitive(false)
 		}
 
-		slider.Range.Connect("change-value", func(sliderRange *gtk.Scale, scrollType C.GtkScrollType, value float64, group *huego.Group) {
+		handler, _ := slider.Range.Connect("change-value", func(sliderRange *gtk.Scale, scrollType C.GtkScrollType, value float64, group huego.Group) {
 			var brightness uint8
 
 			// Will do for each lamp as setting brightness with long scroll to group f#@ks things up
@@ -315,6 +334,9 @@ func buildGroupBox() (box *gtk.Box) {
 
 				lightId, _ := strconv.Atoi(light)
 				l, _ := bridge.GetLight(lightId)
+				if !l.IsOn() {
+					continue
+				}
 				fmt.Printf("lamp: %s\n", l.Name)
 				fmt.Printf("current brightness: %d\n", l.State.Bri)
 
@@ -332,20 +354,27 @@ func buildGroupBox() (box *gtk.Box) {
 				l.Bri(brightness)
 			}
 
-		}, &group)
-		controls[group.ID] = controller{toggleSwitch: switchButton, briRange: &slider.Range}
+		}, group)
+		controls[group.ID] = controller{toggleSwitch: switchButton, briRange: &slider.Range, switchHandler: handler}
 
 	}
 
 	go func(monitorChan chan updateEvent) {
 		for e := range monitorChan {
+			fmt.Println("Got update for group ", e.id)
 			control, ok := controls[e.id]
 			if !ok {
 				continue
 			}
-			control.toggleSwitch.SetActive(e.active)
-			control.briRange.SetSensitive(e.active)
+			// control.toggleSwitch.Object.HandlerDisconnect(control.switchHandler)
+			//control.toggleSwitch.Object.HandlerUnblock(control.switchHandler)
+
+			if e.toggleOn {
+				control.toggleSwitch.SetActive(e.active)
+				control.briRange.SetSensitive(e.active)
+			}
 			control.briRange.SetValue(float64(e.bri))
+
 		}
 
 	}(monitorChan)
@@ -365,10 +394,7 @@ func buildLightBox() (box *gtk.Box) {
 		close(stopChan)
 	}, stopChan)
 	go monitorLamps(monitorChan, stopChan)
-	type controller struct {
-		toggleSwitch *gtk.Switch
-		briRange     *gtk.Range
-	}
+
 	controls := make(map[int]controller)
 
 	for _, lightID := range lightsIds {
